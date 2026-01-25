@@ -4,7 +4,7 @@ import requests
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from models import Base, Estate, Price
+from src.models import Base, Estate, Price
 
 # 1. SETUP DATABÁZE
 engine = create_engine("sqlite:///real_estate.db")

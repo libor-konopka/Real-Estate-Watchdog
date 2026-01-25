@@ -1,0 +1,16 @@
+{
+    "database": {
+        "connection_string": "sqlite:///real_estate.db"
+    },
+    "sreality": {
+        "base_url": "https://www.sreality.cz/api/cs/v2/estates",
+        "district_id": 58,
+        "per_page": 60,
+        "max_pages": 20,
+        "request_delay": 2
+    },
+    "logging": {
+        "level": "INFO",
+        "file": "logs/pipeline.log"
+    }
+}

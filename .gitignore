@@ -1,16 +1,24 @@
-# Python balast
+# Python cache (zbytečný balast)
 __pycache__/
 *.py[cod]
 
-# Databáze 
+# Virtuální prostředí (NIKDY NEPOSÍLAT NA GITHUB!)
+.venv/
+env/
+venv/
+
+# Databáze (Lokální data na GitHub nepatří)
 *.db
 *.sqlite3
 
-# Lokální konfigurace a logy
-.vscode/
-.idea/
+# Logy
+logs/
 *.log
-sample_data.json
 
-# Výstupy analýz 
-*.png
+# Konfigurace (Pokud bys tam měl hesla, sem to patří)
+# config.json # Zatím necháme odkomentované, protože tam nemáš tajná hesla, jen nastavení.
+# Až budeš mít hesla k DB, dáš config.json sem.
+
+# OS files
+.DS_Store
+Thumbs.db
