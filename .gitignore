@@ -1,0 +1,16 @@
+# Python balast
+__pycache__/
+*.py[cod]
+
+# Databáze 
+*.db
+*.sqlite3
+
+# Lokální konfigurace a logy
+.vscode/
+.idea/
+*.log
+sample_data.json
+
+# Výstupy analýz 
+*.png
