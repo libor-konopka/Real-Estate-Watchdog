@@ -14,7 +14,7 @@ root_dir = os.path.dirname(current_dir)
 sys.path.append(root_dir)
 
 try:
-    from config_loader import load_config
+    from src.config_loader import load_config
 except ImportError:
     print("❌ Chyba: Spusť skript ze složky 'analysis' nebo přes python analysis/...")
     sys.exit(1)

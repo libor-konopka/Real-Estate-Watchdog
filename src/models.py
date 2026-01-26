@@ -1,4 +1,4 @@
-from sqlalchemy import Column, DateTime, ForeignKey, Integer, String
+from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, UniqueConstraint
 from sqlalchemy.orm import declarative_base, relationship
 from sqlalchemy.sql import func
 
@@ -8,40 +8,48 @@ Base = declarative_base()
 
 class Estate(Base):
     """
-    Tabulka pro unifikované inzeráty (Nemovitosti).
-    Identifikátorem je sreality_id.
+    Tabulka pro unifikované inzeráty ze VŠECH zdrojů.
+    Unikátnost je dána kombinací: ZDROJ + JEHO ID.
     """
 
     __tablename__ = "estates"
 
     id = Column(Integer, primary_key=True)
-    # Index=True zrychlí vyhledávání při UPSERT operacích
-    sreality_id = Column(Integer, unique=True, nullable=False, index=True)
+
+    # Identifikace zdroje
+    source = Column(String, nullable=False, index=True)  # 'sreality'
+    external_id = Column(String, nullable=False, index=True)  # '12345678'
 
     title = Column(String, nullable=False)
     locality = Column(String, nullable=False)
     description = Column(String, nullable=True)
 
-    # Strukturální data (zatím nullable, naplníme později v Transform)
-    area_match = Column(Integer, nullable=True)  # Užitná plocha v m2
-    land_match = Column(Integer, nullable=True)  # Plocha pozemku v m2
+    # NOVÉ: URL adresa inzerátu
+    url = Column(String, nullable=True)
 
-    # Auditní sloupce (kdy jsme to našli a kdy naposledy viděli)
+    # Velikosti
+    area_match = Column(Integer, nullable=True)
+    land_match = Column(Integer, nullable=True)
+
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
-    # Vazba 1:N (Jeden dům -> Mnoho historických cen)
+    # Kompozitní klíč (Zdroj + ID musí být unikátní)
+    __table_args__ = (
+        UniqueConstraint("source", "external_id", name="_source_ext_id_uc"),
+    )
+
     prices = relationship(
         "Price", back_populates="estate", cascade="all, delete-orphan"
     )
 
     def __repr__(self):
-        return f"<Estate(id={self.sreality_id}, loc='{self.locality}')>"
+        return f"<Estate({self.source}:{self.external_id})>"
 
 
 class Price(Base):
     """
-    Tabulka pro historii cen (Time-Series data).
+    Tabulka pro historii cen.
     """
 
     __tablename__ = "prices"
@@ -49,12 +57,9 @@ class Price(Base):
     id = Column(Integer, primary_key=True)
     estate_id = Column(Integer, ForeignKey("estates.id"), nullable=False)
 
-    # BigInteger by byl bezpečnější pro Postgres, ale Integer v SQLite stačí (do 9 trilionů)
     price = Column(Integer, nullable=False)
-
     scraped_at = Column(DateTime(timezone=True), server_default=func.now())
 
-    # Vazba zpět
     estate = relationship("Estate", back_populates="prices")
 
     def __repr__(self):

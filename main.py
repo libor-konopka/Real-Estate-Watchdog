@@ -4,7 +4,7 @@ import sys
 # Přidáme aktuální adresář do cesty, aby Python viděl balíček 'src'
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-from config_loader import load_config  # Helper funkce (vytvoříme níže)
+from src.config_loader import load_config  # Helper funkce (vytvoříme níže)
 from src.extract import SrealityExtractor
 from src.load import Loader
 from src.logger import logger

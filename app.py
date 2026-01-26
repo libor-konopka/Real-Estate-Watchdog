@@ -1,4 +1,3 @@
-import json
 import os
 import re
 import sqlite3
@@ -6,178 +5,115 @@ import sqlite3
 import pandas as pd
 import streamlit as st
 
-# --- KONFIGURACE A CESTY ---
-st.set_page_config(page_title="Real Estate Watchdog", layout="wide")
+# --- KONFIGURACE STRÁNKY ---
+st.set_page_config(page_title="Real Estate Watchdog", page_icon="🏠", layout="wide")
 
 
-def load_config() -> dict:
-    """Načte konfiguraci pro připojení k DB."""
-    config_path = "config.json"
-    if not os.path.exists(config_path):
-        st.error(f"❌ Chybí konfigurační soubor: {config_path}")
-        st.stop()
+# --- FUNKCE PRO NAČTENÍ DAT ---
+def load_data():
+    # Cesta k DB (robustní vůči spouštění z různých složek)
+    db_path = "real_estate.db"
 
-    with open(config_path, "r", encoding="utf-8") as f:
-        return json.load(f)
-
-
-# Načteme config
-CONFIG = load_config()
-
-
-# --- POMOCNÉ FUNKCE ---
-def get_db_path(connection_string: str) -> str:
-    """Získá čistou cestu k souboru z connection stringu (sqlite:///file.db)."""
-    return connection_string.replace("sqlite:///", "")
-
-
-def extract_land_area(text: str) -> int:
-    """
-    Vytáhne velikost pozemku z textu inzerátu.
-    Příklad: 'Prodej domu 150 m2, pozemek 800 m2' -> 800
-    """
-    if not isinstance(text, str):
-        return 0
-
-    # Odstranění mezer pro snadnější regex (8 000 -> 8000)
-    clean_text = text.replace("\xa0", "").replace(" ", "")
-
-    # Hledáme číslo před 'm' (case insensitive), které následuje po slově 'pozemek'
-    match = re.search(r"pozemek(\d+)m", clean_text, re.IGNORECASE)
-    return int(match.group(1)) if match else 0
-
-
-# --- DATA LOADER ---
-@st.cache_data(ttl=60)
-def load_data(db_path: str) -> pd.DataFrame:
-    """Načte data z SQLite a provede základní transformace."""
     if not os.path.exists(db_path):
-        return pd.DataFrame()  # Vrátí prázdný DF, pokud DB neexistuje
+        st.error(f"❌ Databáze '{db_path}' nenalezena. Spusť nejdřív 'main.py'!")
+        return pd.DataFrame()
 
     conn = sqlite3.connect(db_path)
 
+    # 1. SQL DOTAZ (Upravený pro novou strukturu)
     query = """
     SELECT 
+        e.source,
+        e.external_id,
         e.title, 
         e.locality, 
+        e.url,
         p.price, 
-        p.scraped_at, 
-        e.sreality_id 
-    FROM estates e 
+        p.scraped_at
+    FROM estates e
     JOIN prices p ON e.id = p.estate_id
+    WHERE p.scraped_at = (
+        -- Bereme jen nejnovější cenu
+        SELECT MAX(scraped_at) FROM prices WHERE estate_id = e.id
+    )
+    ORDER BY p.scraped_at DESC
     """
 
+    df = pd.read_sql(query, conn)
+    conn.close()
+    return df
+
+
+# --- POMOCNÉ FUNKCE (Business Logic) ---
+def parse_land_area(text):
+    """Vytáhne velikost pozemku z textu (Bulletproof verze)."""
+    if not isinstance(text, str):
+        return None
+
     try:
-        df = pd.read_sql(query, conn)
-        # Aplikace logiky na vytažení pozemku
-        df["land_m2"] = df["title"].apply(extract_land_area)
-        return df
-    except Exception as e:
-        st.error(f"Chyba při čtení SQL: {e}")
-        return pd.DataFrame()
-    finally:
-        conn.close()
+        clean = text.replace("\xa0", "").replace(" ", "").replace(".", "")
+        match = re.search(r"pozemek(\d+)m", clean, re.IGNORECASE)
+        return int(match.group(1)) if match else None
+    except Exception:
+        return None
 
 
 # --- HLAVNÍ APLIKACE ---
-def main():
-    st.title("🏡 Příbram Real Estate Watchdog")
+st.title("🏡 Real Estate Watchdog (Příbram)")
+st.markdown("Přehled aktuálních inzerátů z Sreality (a dalších zdrojů).")
 
-    # Získání cesty k DB z configu
-    db_conn_str = CONFIG["database"]["connection_string"]
-    db_file = get_db_path(db_conn_str)
+df = load_data()
 
-    # Načtení dat
-    df = load_data(db_file)
+if df.empty:
+    st.warning("Zatím žádná data. Spusť pipeline!")
+else:
+    # 1. Transformace (Dopočítání sloupců)
+    df["land_m2"] = df["title"].apply(parse_land_area)
 
-    if df.empty:
-        st.warning("📭 Databáze je prázdná nebo neexistuje.")
-        st.info("Tip: Spusť nejprve 'main.py' pro stažení dat.")
-        return
-
-    # --- SIDEBAR (Filtry) ---
-    st.sidebar.header("🔍 Filtry")
-
-    # Dynamické rozsahy podle dat
-    max_land_val = int(df["land_m2"].max()) if not df.empty else 5000
-    max_price_val = int(df["price"].max() / 1_000_000) + 1 if not df.empty else 20
-
-    min_land = st.sidebar.slider(
-        "Minimální pozemek (m²)",
-        min_value=0,
-        max_value=max_land_val,
-        value=800,
-        step=100,
-    )
-
-    max_price_mil = st.sidebar.slider(
-        "Maximální cena (mil. Kč)",
-        min_value=1.0,
-        max_value=float(max_price_val),
-        value=6.0,
-        step=0.5,
-    )
-    max_price = max_price_mil * 1_000_000
-
-    # --- FILTRACE DAT ---
-    filtered_df = df[
-        (df["land_m2"] >= min_land) & (df["price"] <= max_price)
-    ].sort_values(by="price")
-
-    # --- KPI METRIKY ---
+    # 2. Metriky v záhlaví
     col1, col2, col3 = st.columns(3)
-    col1.metric("Počet nabídek", len(filtered_df))
+    col1.metric("Počet inzerátů", len(df))
+    col2.metric("Průměrná cena", f"{df['price'].mean():,.0f} Kč".replace(",", " "))
 
-    if not filtered_df.empty:
-        min_price = filtered_df["price"].min()
-        avg_price_m2_land = (filtered_df["price"] / filtered_df["land_m2"]).mean()
+    # Permakultura filtr (Pozemky > 1000 m2)
+    perma_count = len(df[df["land_m2"] > 1000])
+    col3.metric("Permakultura potenciál (>1000m²)", perma_count)
 
-        col2.metric("Nejnižší cena", f"{min_price:,.0f} Kč".replace(",", " "))
-        col3.metric(
-            "Průměrná cena/m² pozemku", f"{avg_price_m2_land:,.0f} Kč".replace(",", " ")
-        )
-    else:
-        col2.metric("Nejnižší cena", "-")
-        col3.metric("Průměr", "-")
+    st.divider()
 
-    # --- TABULKA ---
-    st.subheader(f"Nalezené nemovitosti ({len(filtered_df)})")
-
-    if not filtered_df.empty:
-        display_df = filtered_df.copy()
-        # Generování odkazu
-        display_df["link"] = display_df["sreality_id"].apply(
-            lambda x: f"https://sreality.cz/detail/prodej/dum/x/x/{x}"
+    # 3. FILTRY (Sidebar)
+    with st.sidebar:
+        st.header("Filtrace")
+        # Filtr podle ceny
+        max_price = int(df["price"].max())
+        price_limit = st.slider(
+            "Maximální cena (Kč)", 0, max_price, 15_000_000, step=500_000
         )
 
-        st.dataframe(
-            display_df[["title", "locality", "price", "land_m2", "link"]],
-            column_config={
-                "title": "Název",
-                "locality": "Lokalita",
-                "price": st.column_config.NumberColumn("Cena", format="%d Kč"),
-                "land_m2": st.column_config.NumberColumn(
-                    "Pozemek (m²)", format="%d m²"
-                ),
-                "link": st.column_config.LinkColumn("Odkaz"),
-            },
-            width="stretch",
-            hide_index=True,
-        )
+        # Filtr podle zdroje (příprava do budoucna)
+        sources = df["source"].unique()
+        selected_source = st.multiselect("Zdroj dat", sources, default=sources)
 
-        # --- GRAF ---
-        st.subheader("📊 Analýza trhu (Cena vs. Pozemek)")
-        st.scatter_chart(
-            filtered_df,
-            x="land_m2",
-            y="price",
-            size="land_m2",
-            color="locality",
-            height=500,
-        )
-    else:
-        st.info("Žádné inzeráty neodpovídají filtrům.")
+    # Aplikace filtrů
+    mask = (df["price"] <= price_limit) & (df["source"].isin(selected_source))
+    display_df = df[mask].copy()
 
+    # 4. HLAVNÍ TABULKA
+    st.subheader("📋 Seznam nemovitostí")
 
-if __name__ == "__main__":
-    main()
+    st.dataframe(
+        display_df[["source", "title", "locality", "price", "land_m2", "url"]],
+        column_config={
+            "source": "Zdroj",
+            "title": "Název",
+            "locality": "Lokalita",
+            "price": st.column_config.NumberColumn("Cena", format="%d Kč"),
+            "land_m2": st.column_config.NumberColumn("Pozemek", format="%d m²"),
+            "url": st.column_config.LinkColumn("Odkaz", display_text="Otevřít"),
+        },
+        width="stretch",  # Opravený warning
+        hide_index=True,
+    )
+
+    # 5. Patička
+    st.caption(f"Naposledy aktualizováno: {df['scraped_at'].max()}")

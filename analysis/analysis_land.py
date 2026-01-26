@@ -12,7 +12,7 @@ root_dir = os.path.dirname(current_dir)
 sys.path.append(root_dir)
 
 try:
-    from config_loader import load_config
+    from src.config_loader import load_config
 except ImportError:
     print("❌ Chyba: Nemohu najít config_loader.py. Spouštíš skript ze správné složky?")
     sys.exit(1)

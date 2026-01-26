@@ -26,38 +26,34 @@ class Loader:
         self.Session = sessionmaker(bind=self.engine)
 
     def load(self, data: List[EstateSchema]):
-        """
-        Hlavní metoda pro uložení dat.
-        Provádí UPSERT logiku (Aktualizuj existující, vlož nové).
-        """
         if not data:
-            logger.info("💾 LOAD: Žádná data k uložení.")
             return
 
         session = self.Session()
-        new_estates_count = 0
-        updated_estates_count = 0
-        new_prices_count = 0
+        new_estates = 0
+        updated = 0
+        new_prices = 0
 
         try:
             logger.info("💾 START LOAD: Zahajuji transakci...")
 
             for dto in data:
-                # 1. Hledáme, zda nemovitost už existuje (podle Sreality ID)
+                # 1. Hledáme podle KOMPOZITNÍHO KLÍČE (Source + External ID)
                 estate = (
-                    session.query(Estate).filter_by(sreality_id=dto.sreality_id).first()
+                    session.query(Estate)
+                    .filter_by(source=dto.source, external_id=dto.external_id)
+                    .first()
                 )
 
                 if estate:
-                    # --- SCÉNÁŘ A: Nemovitost už známe (UPDATE) ---
-                    # Aktualizujeme metadata (kdyby se změnil název nebo lokalita)
-                    if estate.title != dto.title or estate.locality != dto.locality:
+                    # UPDATE existujícího
+                    if estate.title != dto.title or estate.url != dto.url:
                         estate.title = dto.title
                         estate.locality = dto.locality
-                        updated_estates_count += 1
+                        estate.url = dto.url  # Aktualizujeme URL kdyby se změnila
+                        updated += 1
 
-                    # Kontrola ceny (zajímá nás vývoj v čase)
-                    # Najdeme poslední známou cenu pro tuto nemovitost
+                    # Logika ceny (zůstává stejná)
                     last_price = (
                         session.query(Price)
                         .filter_by(estate_id=estate.id)
@@ -65,59 +61,49 @@ class Loader:
                         .first()
                     )
 
-                    # Pokud se cena změnila (nebo žádná není), vložíme novou
                     if not last_price or last_price.price != dto.price:
-                        # Logování zajímavé události
                         if last_price:
                             diff = dto.price - last_price.price
-                            logger.info(
-                                f"💰 Změna ceny (ID {dto.sreality_id}): {last_price.price} -> {dto.price} ({diff:+d} CZK)"
-                            )
+                            logger.info(f"💰 Změna ceny ({dto.title}): {diff:+d} CZK")
 
-                        new_price = Price(
-                            price=dto.price,
-                            estate=estate,  # SQLAlchemy vazba
-                            scraped_at=dto.scraped_at,
+                        session.add(
+                            Price(
+                                price=dto.price,
+                                estate=estate,
+                                scraped_at=dto.scraped_at,
+                            )
                         )
-                        session.add(new_price)
-                        new_prices_count += 1
+                        new_prices += 1
 
                 else:
-                    # --- SCÉNÁŘ B: Nová nemovitost (INSERT) ---
+                    # INSERT nového
                     new_estate = Estate(
-                        sreality_id=dto.sreality_id,
+                        source=dto.source,
+                        external_id=dto.external_id,
                         title=dto.title,
                         locality=dto.locality,
+                        url=dto.url,
                     )
                     session.add(new_estate)
-                    session.flush()  # Vynutí přidělení ID pro new_estate, abychom ho mohli použít pro Price
+                    session.flush()  # Získáme ID
 
-                    # Přidáme první cenu
-                    initial_price = Price(
-                        price=dto.price,
-                        estate_id=new_estate.id,
-                        scraped_at=dto.scraped_at,
+                    session.add(
+                        Price(
+                            price=dto.price,
+                            estate_id=new_estate.id,
+                            scraped_at=dto.scraped_at,
+                        )
                     )
-                    session.add(initial_price)
-                    new_estates_count += 1
+                    new_estates += 1
 
-            # 2. COMMIT (Potvrzení transakce)
             session.commit()
-
-            # Enterprise Reporting
             logger.info(
-                f"✅ LOAD COMPLETE: "
-                f"+{new_estates_count} nových domů, "
-                f"{updated_estates_count} aktualizovaných popisů, "
-                f"+{new_prices_count} nových cen."
+                f"✅ LOAD: +{new_estates} nových, {updated} update, +{new_prices} cen."
             )
 
         except Exception as e:
-            # 3. ROLLBACK (Vrátit změny při chybě)
             session.rollback()
-            logger.critical(f"🔥 CHYBA DATABÁZE (Rollback proveden): {e}")
-            raise e  # Vyhoď chybu dál, ať main.py ví, že to spadlo
-
+            logger.critical(f"🔥 DB ERROR: {e}")
+            raise e
         finally:
-            # 4. CLOSE (Vždy zavřít spojení)
             session.close()

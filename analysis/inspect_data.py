@@ -10,7 +10,7 @@ root_dir = os.path.dirname(current_dir)
 sys.path.append(root_dir)
 
 try:
-    from config_loader import load_config
+    from src.config_loader import load_config
 except ImportError:
     print("❌ Chyba: Nenalezen config_loader.py.")
     sys.exit(1)
