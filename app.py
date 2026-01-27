@@ -46,13 +46,24 @@ def load_data():
 
 # --- POMOCNÉ FUNKCE (Business Logic) ---
 def parse_land_area(text):
-    """Vytáhne velikost pozemku z textu (Bulletproof verze)."""
+    """Vytáhne velikost pozemku z textu (Nuclear Option ☢️)."""
     if not isinstance(text, str):
         return None
 
     try:
-        clean = text.replace("\xa0", "").replace(" ", "").replace(".", "")
-        match = re.search(r"pozemek(\d+)m", clean, re.IGNORECASE)
+        # 1. Normalizace: Malá písmena
+        # 2. Odstranění VŠECH bílých znaků (mezery, taby, \xa0, thin space...)
+        #    "".join(text.split()) je nejspolehlivější metoda v Pythonu.
+        clean = "".join(text.lower().split())
+
+        # 3. Odstranění teček a čárek (pro čísla jako 1.200)
+        clean = clean.replace(".", "").replace(",", "")
+
+        # 4. Regex: Hledá "pozem" + cokoliv (ek/kem) + číslo
+        # Už nevyžadujeme "m" na konci, protože kontext "pozemek" je dostatečně silný.
+        # Příklad vstupu: "prodej...spozemkem1673m2" -> najde 1673
+        match = re.search(r"pozem[a-z]*(\d+)", clean)
+
         return int(match.group(1)) if match else None
     except Exception:
         return None

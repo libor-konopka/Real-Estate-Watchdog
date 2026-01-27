@@ -1,55 +1,66 @@
-import os
+import asyncio
 import sys
 
-# Přidáme aktuální adresář do cesty, aby Python viděl balíček 'src'
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+import aiohttp
 
-from src.config_loader import load_config  # Helper funkce (vytvoříme níže)
-from src.extract import SrealityExtractor
+# Importy z našeho balíčku
+from src.config_loader import load_config
+from src.extract import IdnesScraper, SrealityScraper
 from src.load import Loader
 from src.logger import logger
 from src.transform import Transformer
 
 
+async def run_extraction(config):
+    """Spustí oba scrapery PARALELNĚ."""
+    scrapers = [SrealityScraper(config), IdnesScraper(config)]
+
+    all_results = []
+
+    # Jedna session pro všechny requesty (efektivnější)
+    async with aiohttp.ClientSession() as session:
+        # Vytvoříme 'tasky' pro spuštění
+        tasks = [scraper.scrape(session) for scraper in scrapers]
+
+        # Spustíme je naráz a čekáme, až doběhnou všechny
+        results_list = await asyncio.gather(*tasks)
+
+        # Sloučíme výsledky ze všech zdrojů do jednoho seznamu
+        for res in results_list:
+            all_results.extend(res)
+
+    return all_results
+
+
 def main():
-    logger.info("🚀 START: Spouštím Real Estate Watchdog Pipeline")
+    logger.info("🚀 PIPELINE STARTED (Async Mode)")
 
-    # 1. Načtení konfigurace
     try:
+        # 1. Konfigurace
         config = load_config()
-    except Exception as e:
-        logger.critical(f"Chyba konfigurace: {e}")
-        return
 
-    # 2. Dependency Injection (Příprava nástrojů)
-    extractor = SrealityExtractor(config["sreality"])
-    loader = Loader(config["database"]["connection_string"])
-
-    # 3. ETL Proces
-    try:
-        # A) EXTRACT
-        logger.info("--- Fáze 1: Extraction ---")
-        raw_data = extractor.extract()
-        logger.info(f"Staženo {len(raw_data)} položek.")
+        # 2. Extract (Async)
+        # Musíme použít asyncio.run pro spuštění async funkce v sync světě
+        raw_data = asyncio.run(run_extraction(config))
 
         if not raw_data:
-            logger.warning("Žádná data ke zpracování. Končím.")
+            logger.warning("⚠️ Žádná data nebyla stažena.")
             return
 
-        # B) TRANSFORM
-        logger.info("--- Fáze 2: Transformation ---")
+        # 3. Transform (Sync)
+        # Transformace je CPU-bound, tam async tolik nepomůže, stačí sync
         clean_data = Transformer.transform(raw_data)
-        logger.info(f"Zvalidováno {len(clean_data)} položek.")
 
-        # C) LOAD
-        logger.info("--- Fáze 3: Loading ---")
+        # 4. Load (Sync)
+        # SQLite nemá rádo async zápisy z více vláken, držíme to sync
+        loader = Loader(config)
         loader.load(clean_data)
 
-        logger.info("✅ SUCCESS: Pipeline úspěšně dokončena.")
+        logger.info("🏁 PIPELINE FINISHED SUCCESSFULLY")
 
     except Exception as e:
-        logger.critical(f"🔥 FATAL ERROR: Pipeline spadla: {e}")
-        raise e
+        logger.critical(f"🔥 FATAL ERROR: {e}")
+        sys.exit(1)
 
 
 if __name__ == "__main__":
