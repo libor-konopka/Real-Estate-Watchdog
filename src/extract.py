@@ -117,17 +117,26 @@ class IdnesScraper(BaseScraper):
                         price_tag = article.find("p", class_="c-products__price")
 
                         if link_tag and title_tag:
+                            # 1. Defenzivní získání atributu (odstraňuje riziko KeyError)
+                            raw_href = link_tag.get("href")
+
+                            # 2. Materializace do jistoty (řeší varování AttributeValueList)
+                            if isinstance(raw_href, list):
+                                href = str(raw_href[0])
+                            else:
+                                href = str(raw_href or "")
+
                             item = {
                                 "_source_label": "idnes",
-                                "external_id": link_tag["href"]
-                                .strip("/")
-                                .split("/")[-1],  # ID z URL
+                                "external_id": href.strip("/").split("/")[-1]
+                                if href
+                                else "",
                                 "title": title_tag.get_text(strip=True),
-                                "url": link_tag["href"],
+                                "url": href,
                                 "price_raw": price_tag.get_text(strip=True)
                                 if price_tag
                                 else "0",
-                                "locality": "Příbram (okres)",  # iDnes má lokalitu složitější, zatím placeholder
+                                "locality": "Příbram (okres)",
                             }
                             results.append(item)
 

@@ -1,9 +1,14 @@
-from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, UniqueConstraint
-from sqlalchemy.orm import declarative_base, relationship
+from datetime import datetime
+from typing import List, Optional
+
+from sqlalchemy import DateTime, ForeignKey, Integer, String, UniqueConstraint
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 
-# Definice základní třídy pro modely
-Base = declarative_base()
+
+# Základní třída v novém standardu SQLAlchemy 2.0
+class Base(DeclarativeBase):
+    pass
 
 
 class Estate(Base):
@@ -14,36 +19,43 @@ class Estate(Base):
 
     __tablename__ = "estates"
 
-    id = Column(Integer, primary_key=True)
+    id: Mapped[int] = mapped_column(primary_key=True)
 
     # Identifikace zdroje
-    source = Column(String, nullable=False, index=True)  # 'sreality'
-    external_id = Column(String, nullable=False, index=True)  # '12345678'
+    source: Mapped[str] = mapped_column(String, index=True)
+    external_id: Mapped[str] = mapped_column(String, index=True)
 
-    title = Column(String, nullable=False)
-    locality = Column(String, nullable=False)
-    description = Column(String, nullable=True)
+    # Základní data
+    title: Mapped[str] = mapped_column(String)
+    locality: Mapped[str] = mapped_column(String)
 
-    # NOVÉ: URL adresa inzerátu
-    url = Column(String, nullable=True)
+    # Volitelná data (Optional definuje nullable=True na úrovni Pythonu i DB)
+    description: Mapped[Optional[str]] = mapped_column(String)
+    url: Mapped[Optional[str]] = mapped_column(String)
 
     # Velikosti
-    area_match = Column(Integer, nullable=True)
-    land_match = Column(Integer, nullable=True)
+    area_match: Mapped[Optional[int]] = mapped_column(Integer)
+    land_match: Mapped[Optional[int]] = mapped_column(Integer)
 
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    # Časová razítka
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), onupdate=func.now()
+    )
 
     # Kompozitní klíč (Zdroj + ID musí být unikátní)
     __table_args__ = (
         UniqueConstraint("source", "external_id", name="_source_ext_id_uc"),
     )
 
-    prices = relationship(
-        "Price", back_populates="estate", cascade="all, delete-orphan"
+    # Relace
+    prices: Mapped[List["Price"]] = relationship(
+        back_populates="estate", cascade="all, delete-orphan"
     )
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"<Estate({self.source}:{self.external_id})>"
 
 
@@ -54,13 +66,16 @@ class Price(Base):
 
     __tablename__ = "prices"
 
-    id = Column(Integer, primary_key=True)
-    estate_id = Column(Integer, ForeignKey("estates.id"), nullable=False)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    estate_id: Mapped[int] = mapped_column(ForeignKey("estates.id"))
 
-    price = Column(Integer, nullable=False)
-    scraped_at = Column(DateTime(timezone=True), server_default=func.now())
+    price: Mapped[int] = mapped_column(Integer)
+    scraped_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
 
-    estate = relationship("Estate", back_populates="prices")
+    # Relace zpět
+    estate: Mapped["Estate"] = relationship(back_populates="prices")
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"<Price(val={self.price}, date='{self.scraped_at}')>"
