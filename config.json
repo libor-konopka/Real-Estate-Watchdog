@@ -3,11 +3,21 @@
         "connection_string": "sqlite:///real_estate.db"
     },
     "sreality": {
-        "base_url": "https://www.sreality.cz/api/cs/v2/estates",
+        "base_url": "https://www.sreality.cz/api/v1/estates/search",
+        "category_main_cb": 2,
+        "category_type_cb": 1,
+        "locality_country_id": 112,
+        "locality_region_id": 11,
         "district_id": 58,
         "per_page": 60,
         "max_pages": 20,
         "request_delay": 2
+    },
+    "idnes": {
+        "base_url": "https://reality.idnes.cz/s/prodej/domy/okres-pribram/",
+        "max_pages": 5,
+        "request_delay": 1.0,
+        "default_locality": "Příbram (okres)"
     },
     "logging": {
         "level": "INFO",

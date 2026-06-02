@@ -44,42 +44,82 @@ class Transformer:
 
                 # --- LOGIKA PRO SREALITY ---
                 if source == "sreality":
-                    price = item.get("price_czk", {}).get("value_raw", 0)
-                    ext_id = str(item["hash_id"])
-
-                    # Rychlá kontrola duplicity uvnitř dávky
-                    if ("sreality", ext_id) in seen_ids:
+                    # 1. Extrakce ID a kontrola existence
+                    raw_id = item.get("hash_id")
+                    if not raw_id:
+                        logger.warning(
+                            f"Přeskočen inzerát bez hash_id: {item.get('advert_name')}"
+                        )
                         continue
 
-                    locality_slug = Transformer._slugify(item.get("locality", ""))
-                    url = f"https://www.sreality.cz/detail/prodej/dum/rodinny/{locality_slug}/{ext_id}"
+                    external_id = str(raw_id)
+                    title = item.get("advert_name", "Neznámý titulek")
 
-                    estate = EstateSchema(
-                        source="sreality",
-                        external_id=ext_id,
-                        title=item["name"],
-                        locality=item["locality"],
-                        price=int(price) if price else 0,
-                        url=url,
-                    )
+                    # 2. Extrakce lokality z vnořeného objektu
+                    locality_obj = item.get("locality", {})
+                    # Pokud chybí 'city', vezmeme prázdný řetězec a Pydantic ho případně zachytí
+                    locality = locality_obj.get("city", "Neznámá lokalita")
+
+                    # 3. Získání čisté ceny v CZK
+                    price = item.get("price_czk")
+
+                    # 4. Konstrukce URL (Sreality tvoří URL na frontendu takto)
+                    # Formát: https://www.sreality.cz/detail/prodej/dum/rodinny/{seo_lokalita}/{hash_id}
+                    seo_city = locality_obj.get("city_seo_name", "neznama-lokalita")
+                    url = f"https://www.sreality.cz/detail/prodej/dum/rodinny/{seo_city}/{external_id}"
+
+                    # Sestavení normalizovaného slovníku
+                    normalized = {
+                        "source": source,  # Opraveno z _source_label
+                        "external_id": external_id,
+                        "title": title,
+                        "locality": locality,
+                        "url": url,
+                        "price": int(price)
+                        if price is not None
+                        else 0,  # Opraveno z price_raw a převedeno na int
+                        "area_match": None,
+                        "land_match": None,
+                    }
+
+                    # Předání do Pydantic modelu a uložení
+                    try:
+                        parsed_item = EstateSchema(**normalized)
+                        valid_items.append(parsed_item)
+                    except Exception as e:
+                        logger.warning(
+                            f"SREALITY: Neplatný inzerát {external_id} - {e}"
+                        )
 
                 # --- LOGIKA PRO IDNES ---
                 elif source == "idnes":
                     ext_id = item.get("external_id")
 
+                    # Defenzivní kontroly proti chybějícím datům
+                    if not ext_id:
+                        logger.warning("IDNES: Přeskočen inzerát bez external_id")
+                        skipped += 1
+                        continue
+
                     # Rychlá kontrola duplicity uvnitř dávky
                     if ("idnes", ext_id) in seen_ids:
                         continue
 
-                    price = Transformer._parse_price(item.get("price_raw"))
+                    price_raw = item.get("price_raw", "0")
+                    price = Transformer._parse_price(str(price_raw))
+
+                    # Bezpečné stažení s fallback hodnotami (zabrání chybám Unknown | None)
+                    title = str(item.get("title", "Neznámý titulek"))
+                    locality = str(item.get("locality", "Neznámá lokalita"))
+                    url = str(item.get("url", ""))
 
                     estate = EstateSchema(
                         source="idnes",
-                        external_id=ext_id,
-                        title=item["title"],
-                        locality=item["locality"],
+                        external_id=str(ext_id),
+                        title=title,
+                        locality=locality,
                         price=price,
-                        url=item["url"],
+                        url=url,
                     )
 
                 else:

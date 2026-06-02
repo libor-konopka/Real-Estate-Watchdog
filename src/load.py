@@ -6,6 +6,7 @@ from sqlalchemy.orm import sessionmaker
 from .domain import EstateSchema
 from .logger import logger
 from .models import Base, Estate, Price
+from .settings import AppConfig
 
 
 class Loader:
@@ -14,11 +15,8 @@ class Loader:
     Řeší deduplikaci (Insert vs Update) a historii cen.
     """
 
-    def __init__(self, config: dict):
-        # --- OPRAVA ZDE ---
-        # Musíme vytáhnout string zanořený v configu
-        # Původně to bralo celé 'config' a spadlo to.
-        db_connection_string = config["database"]["connection_string"]
+    def __init__(self, config: AppConfig):
+        db_connection_string = config.database.connection_string
 
         self.engine = create_engine(db_connection_string)
         Base.metadata.create_all(self.engine)

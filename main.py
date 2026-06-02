@@ -1,65 +1,67 @@
+"""
+Hlavní orchestrátor datové pipeline (Real-Estate-Watchdog).
+Spouští asynchronní extrakci, synchronní transformaci a uložení do databáze.
+"""
+
 import asyncio
+import itertools
 import sys
+from typing import Any, Dict, List
 
 import aiohttp
 
-# Importy z našeho balíčku
-from src.config_loader import load_config
 from src.extract import IdnesScraper, SrealityScraper
 from src.load import Loader
 from src.logger import logger
+from src.settings import AppConfig
 from src.transform import Transformer
 
 
-async def run_extraction(config):
-    """Spustí oba scrapery PARALELNĚ."""
+async def run_extraction(config: AppConfig) -> List[Dict[str, Any]]:
+    """Spustí datové extraktory paralelně a sloučí jejich energetické toky."""
     scrapers = [SrealityScraper(config), IdnesScraper(config)]
 
-    all_results = []
-
-    # Jedna session pro všechny requesty (efektivnější)
+    # Sdílená TCP session pro minimalizaci síťové režie
     async with aiohttp.ClientSession() as session:
-        # Vytvoříme 'tasky' pro spuštění
         tasks = [scraper.scrape(session) for scraper in scrapers]
-
-        # Spustíme je naráz a čekáme, až doběhnou všechny
         results_list = await asyncio.gather(*tasks)
 
-        # Sloučíme výsledky ze všech zdrojů do jednoho seznamu
-        for res in results_list:
-            all_results.extend(res)
-
-    return all_results
+    # Nízkoúrovňové (C) splynutí toků bez paměťové alokace navíc
+    return list(itertools.chain.from_iterable(results_list))
 
 
-def main():
+def main() -> None:
+    """Řídí životní cyklus celé aplikace."""
     logger.info("🚀 PIPELINE STARTED (Async Mode)")
 
     try:
-        # 1. Konfigurace
-        config = load_config()
+        # --- FÁZE 1: INICIALIZACE ---
+        config = AppConfig.load("config.json")
 
-        # 2. Extract (Async)
-        # Musíme použít asyncio.run pro spuštění async funkce v sync světě
-        raw_data = asyncio.run(run_extraction(config))
+        # --- FÁZE 2: EXTRAKCE (Async) ---
+        run_kwargs = {}
+        if sys.platform == "win32":
+            # Ochrana před konflikty Windows Event Loopu v Pythonu 3.14+
+            run_kwargs["loop_factory"] = asyncio.SelectorEventLoop
+
+        raw_data = asyncio.run(run_extraction(config), **run_kwargs)
 
         if not raw_data:
-            logger.warning("⚠️ Žádná data nebyla stažena.")
+            logger.warning("⚠️ Žádná data nebyla stažena. Ukončuji tok.")
             return
 
-        # 3. Transform (Sync)
-        # Transformace je CPU-bound, tam async tolik nepomůže, stačí sync
+        # --- FÁZE 3: TRANSFORMACE (Sync) ---
         clean_data = Transformer.transform(raw_data)
 
-        # 4. Load (Sync)
-        # SQLite nemá rádo async zápisy z více vláken, držíme to sync
+        # --- FÁZE 4: ULOŽENÍ (Sync) ---
         loader = Loader(config)
         loader.load(clean_data)
 
         logger.info("🏁 PIPELINE FINISHED SUCCESSFULLY")
 
-    except Exception as e:
-        logger.critical(f"🔥 FATAL ERROR: {e}")
+    except Exception:
+        # Automaticky zaznamená i kompletní stack trace pro snazší diagnostiku
+        logger.exception("🔥 FATAL ERROR: Zhroucení hlavního toku")
         sys.exit(1)
 
 
