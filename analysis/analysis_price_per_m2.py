@@ -1,34 +1,29 @@
-import os
 import re
-import sqlite3
 import sys
+from pathlib import Path
+from typing import Optional
 
 import pandas as pd
+from sqlalchemy import create_engine
 
-# --- 1. PATH HACK (Napojení na config z rootu) ---
-current_dir = os.path.dirname(os.path.abspath(__file__))
-root_dir = os.path.dirname(current_dir)
-sys.path.append(root_dir)
+# --- 1. UKOTVENÍ PROSTORU (Pathlib) ---
+current_dir = Path(__file__).resolve().parent
+root_dir = current_dir.parent
+sys.path.append(str(root_dir))
 
 try:
-    from src.config_loader import load_config
+    from src.settings import get_settings
 except ImportError:
-    print("❌ Chyba importu: Spouštíš skript ze správné složky?")
+    print("❌ Chyba: Nemohu najít src.settings. Spouštíš skript z kořenového adresáře?")
     sys.exit(1)
 
-# --- 2. CONFIG SETUP ---
-config = load_config()
-db_path_raw = config["database"]["connection_string"].replace("sqlite:///", "")
-db_path = os.path.join(root_dir, db_path_raw)
+# --- 2. NAČTENÍ ENERGIE A SPOJENÍ S HMOTOU ---
+settings = get_settings()
+db_url = settings.database.connection_string
 
-if not os.path.exists(db_path):
-    print(f"❌ DB nenalezena: {db_path}")
-    sys.exit(1)
+engine = create_engine(db_url)
 
-# --- 3. SQL (Pouze aktuální ceny) ---
-conn = sqlite3.connect(db_path)
-
-# Tento dotaz zajistí, že pro každý dům máme jen tu NEJNOVĚJŠÍ cenu
+# --- 3. EXTRAKCE DAT (SQL) ---
 query = """
 SELECT e.title, e.locality, p.price
 FROM estates e
@@ -39,34 +34,35 @@ WHERE p.scraped_at = (
 AND p.price > 100000
 """
 
-df = pd.read_sql(query, conn)
-conn.close()
+print("📡 Čerpám data z databáze...")
+try:
+    with engine.connect() as conn:
+        df = pd.read_sql(query, conn)
+except Exception as e:
+    print(f"❌ Nelze se spojit s databází: {e}")
+    sys.exit(1)
 
 if df.empty:
-    print("📭 Žádná data.")
-    sys.exit()
+    print("📭 Databáze je prázdná. Žádná data k analýze.")
+    sys.exit(0)
 
 
-# --- 4. ROBUSTNÍ REGEX (Ochrana proti záměně s pozemkem) ---
-def extract_house_area(text):
+# --- 4. ROBUSTNÍ REGEX A TRANSFORMACE ---
+def extract_house_area(text: str) -> Optional[int]:
+    """Extrakce obytné plochy s fallbackem."""
     if not isinstance(text, str):
         return None
 
     clean_text = text.replace("\xa0", "").replace(" ", "")
 
-    # Hledáme číslo, před kterým je specifické slovo (domu, chaty, plocha...)
-    # Tím ignorujeme "pozemek 800m", "do centra 500m" atd.
     match = re.search(
         r"(?:domu|chalupy|vily|usedlosti|chaty|bytu|plocha|užitná)(\d+)m",
         clean_text,
         re.IGNORECASE,
     )
-
     if match:
         return int(match.group(1))
 
-    # Fallback: Pokud nezaberou klíčová slova, zkusíme najít číslo na úplném začátku stringu
-    # Typicky: "Prodej domu 150 m2..." -> "Prodejdomu150m2"
     match_fallback = re.search(r"^prodej[a-z]*(\d+)m", clean_text, re.IGNORECASE)
     if match_fallback:
         return int(match_fallback.group(1))
@@ -77,38 +73,36 @@ def extract_house_area(text):
 print("🔄 Analyzuji obytnou plochu...")
 df["area"] = df["title"].apply(extract_house_area)
 
-# Vyhodíme neznámé velikosti a extrémy (boudy pod 15m2)
+# Očištění od prázdnoty a extrémů (vektorový filter)
 df = df.dropna(subset=["area"])
-df = df[df["area"] > 15]
+df = df[df["area"] > 15].copy()  # explicitní kopie zabrání SettingWithCopyWarning
 
-# --- 5. METRIKY ---
+# --- 5. VEKTOROVÉ METRIKY ---
 df["price_per_m2"] = df["price"] / df["area"]
 
-# --- 6. VÝSTUP ---
+# --- 6. VÝSTUP A MANIFESTACE ---
+# Globální nastavení vzhledu a formátování měny
 pd.set_option("display.max_columns", None)
 pd.set_option("display.width", 1000)
 pd.set_option("display.max_colwidth", 50)
+pd.set_option("display.float_format", "{:,.0f}".format)
 
-print("\n" + "=" * 60)
+print("\n" + "=" * 80)
 print(f"🏠 ANALÝZA CENY ZA m² ({len(df)} validních inzerátů)")
-print("=" * 60)
+print("=" * 80)
 
-# Žebříček nejlevnějších
 print("\n🔥 TOP 10 NEJVÝHODNĚJŠÍCH (Cena/m²):")
+best_m2 = df.sort_values(by="price_per_m2").head(10)
 print(
-    df[["title", "locality", "price", "area", "price_per_m2"]]
-    .sort_values(by="price_per_m2")
-    .head(10)
-    .to_string(
-        index=False,
-        formatters={"price": "{:,.0f}".format, "price_per_m2": "{:,.0f}".format},
+    best_m2[["title", "locality", "price", "area", "price_per_m2"]].reset_index(
+        drop=True
     )
 )
 
-# Statistiky
+# Statistiky trhu
 avg_m2 = df["price_per_m2"].mean()
 median_m2 = df["price_per_m2"].median()
 
 print("\n📊 STATISTIKA TRHU:")
 print(f"Průměr: {avg_m2:,.0f} Kč/m²")
-print(f"Medián: {median_m2:,.0f} Kč/m² (Reálnější střed)")
+print(f"Medián: {median_m2:,.0f} Kč/m² (Odolnější vůči extrémům)")

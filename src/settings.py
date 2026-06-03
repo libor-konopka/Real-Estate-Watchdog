@@ -1,4 +1,5 @@
 import json
+from functools import lru_cache
 from pathlib import Path
 
 from pydantic import BaseModel, Field
@@ -76,3 +77,20 @@ class AppConfig(BaseModel):
             data = json.load(f)
 
         return cls(**data)
+
+
+@lru_cache
+def get_settings() -> AppConfig:
+    """
+    Ukotvení konfigurace do paměti (Singleton).
+    Dekorátor @lru_cache zajistí jediné čtení z disku.
+    Využívá absolutní cestu, takže datový tok nezkolabuje
+    při volání z podsložek (např. z vrstvy analysis).
+    """
+    # resolve() ukotví absolutní cestu k settings.py
+    current_dir = Path(__file__).resolve().parent
+    # parent z src/ nás posune do rootu projektu
+    root_dir = current_dir.parent
+    config_file = root_dir / "config.json"
+
+    return AppConfig.load(str(config_file))

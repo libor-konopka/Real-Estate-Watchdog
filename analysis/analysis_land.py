@@ -1,106 +1,96 @@
-import os
 import re
-import sqlite3
 import sys
+from pathlib import Path
 
 import pandas as pd
+from sqlalchemy import create_engine
 
-# --- 1. PATH HACK (Abychom viděli na config_loader v rodičovské složce) ---
-# Získáme cestu k aktuálnímu souboru a jdeme o úroveň výš (do rootu)
-current_dir = os.path.dirname(os.path.abspath(__file__))
-root_dir = os.path.dirname(current_dir)
-sys.path.append(root_dir)
+# --- 1. UKOTVENÍ PROSTORU (Pathlib) ---
+# Získáme absolutní cestu k rootu projektu a přidáme ji do cesty
+current_dir = Path(__file__).resolve().parent
+root_dir = current_dir.parent
+sys.path.append(str(root_dir))
 
 try:
-    from src.config_loader import load_config
+    from src.settings import get_settings
 except ImportError:
-    print("❌ Chyba: Nemohu najít config_loader.py. Spouštíš skript ze správné složky?")
+    print("❌ Chyba: Nemohu najít src.settings. Spouštíš skript z kořenového adresáře?")
     sys.exit(1)
 
-# --- 2. NAČTENÍ KONFIGURACE ---
-config = load_config()
-db_conn_string = config["database"]["connection_string"]
-# Odstraníme 'sqlite:///' abychom dostali čistou cestu k souboru
-db_path = os.path.join(root_dir, db_conn_string.replace("sqlite:///", ""))
+# --- 2. NAČTENÍ ENERGIE A SPOJENÍ S HMOTOU ---
+settings = get_settings()
+db_url = settings.database.connection_string
 
-if not os.path.exists(db_path):
-    print(f"❌ Databáze neexistuje na cestě: {db_path}")
-    print("Tip: Spusť nejprve 'main.py' v kořenu projektu.")
-    sys.exit(1)
+# Vytvoření SQLAlchemy enginu (Pandas s ním nativně komunikuje)
+engine = create_engine(db_url)
 
-# --- 3. PANDAS & SQL ---
-conn = sqlite3.connect(db_path)
-
+# --- 3. EXTRAKCE DAT (SQL) ---
 query = """
 SELECT e.title, e.locality, p.price
 FROM estates e
 JOIN prices p ON e.id = p.estate_id
--- Vezmeme jen nejnovější cenu pro každou nemovitost (pokud by jich bylo víc)
 WHERE p.scraped_at = (
     SELECT MAX(scraped_at) FROM prices WHERE estate_id = e.id
 )
-AND p.price > 100000 -- Ignorujeme podezřele levné (např. 'Cena za m2')
+AND p.price > 100000
 """
 
+print("📡 Čerpám data z databáze...")
 try:
-    df = pd.read_sql(query, conn)
-finally:
-    conn.close()
+    # Pandas 2.0+ doporučuje používat SQLAlchemy connection explicitně
+    with engine.connect() as conn:
+        df = pd.read_sql(query, conn)
+except Exception as e:
+    print(f"❌ Nelze se spojit s databází: {e}")
+    sys.exit(1)
 
 if df.empty:
     print("📭 Databáze je prázdná. Žádná data k analýze.")
     sys.exit(0)
 
 
-# --- 4. DATA MINING (REGEX) ---
-def extract_data(text):
+# --- 4. TRANSFORMACE DAT (REGEX) ---
+def extract_areas(text: str) -> pd.Series:
+    """Extrahuje velikost domu a pozemku z titulku."""
     if not isinstance(text, str):
         return pd.Series([None, None])
 
-    # Odstraníme pevné mezery a běžné mezery -> "Prodejdomu150m2,pozemek800m2"
     clean_text = text.replace("\xa0", "").replace(" ", "")
 
-    # A. Hledáme dům (číslo před 'm' na začátku nebo po typu nemovitosti)
-    # Regex hledá např. "domu150m"
     house_match = re.search(
         r"(?:domu|chalupy|vily|usedlosti|chaty|prodej)(\d+)m", clean_text, re.IGNORECASE
     )
     house_area = int(house_match.group(1)) if house_match else None
 
-    # B. Hledáme pozemek (číslo za slovem "pozemek")
     land_match = re.search(r"pozemek(\d+)m", clean_text, re.IGNORECASE)
     land_area = int(land_match.group(1)) if land_match else None
 
     return pd.Series([house_area, land_area])
 
 
-# Aplikace regexu
-print("🔄 Analyzuji texty inzerátů...")
-df[["house_m2", "land_m2"]] = df["title"].apply(extract_data)
+print("🔄 Normalizuji dimenze inzerátů...")
+df[["house_m2", "land_m2"]] = df["title"].apply(extract_areas)
 
-# --- 5. VÝPOČTY A METRIKY ---
-# Cena za m2 pozemku (pouze pokud je pozemek > 0)
-df["price_per_land"] = df.apply(
-    lambda x: x["price"] / x["land_m2"] if x["land_m2"] and x["land_m2"] > 0 else None,
-    axis=1,
-)
+# --- 5. VEKTOROVÉ VÝPOČTY (Data Engineering Best Practice) ---
+# Vektorové dělení je okamžité. Pandas automaticky zvládne NaN hodnoty.
+df["price_per_land"] = df["price"] / df["land_m2"]
 
-# --- 6. VÝSTUP ---
+# --- 6. VÝSTUP A MANIFESTACE ---
 pd.set_option("display.max_columns", None)
 pd.set_option("display.width", 1000)
-pd.set_option("display.max_colwidth", 50)  # Zkrátíme dlouhé názvy
+pd.set_option("display.max_colwidth", 50)
 
 print("\n" + "=" * 80)
 print(f"📊 ANALÝZA TRHU ({len(df)} inzerátů)")
 print("=" * 80)
 
-# Permakultura TOP 10 (Velké pozemky)
-print("\n🌳 TOP 10: Největší pozemky (Potenciál pro soběstačnost)")
+# Potenciál pro soběstačnost a celostní systémy
+print("\n🌳 TOP 10: Největší pozemky (Potenciál pro soběstačnost a ekologii)")
 top_land = df.sort_values(by="land_m2", ascending=False).head(10)
 print(top_land[["title", "locality", "price", "land_m2", "price_per_land"]])
 
-# Investiční TOP 10 (Nejlevnější m2, ale smysluplná velikost)
-print("\n💰 TOP 10: Nejvýhodnější cena za m² (Pozemky > 800 m²)")
+# Investiční hledisko
+print("\n💰 TOP 10: Nejvýhodnější cena za m² (Pozemky nad 800 m²)")
 big_plots = df[df["land_m2"] > 800].copy()
 
 if not big_plots.empty:

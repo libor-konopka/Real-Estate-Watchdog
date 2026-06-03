@@ -1,45 +1,39 @@
-import os
-import sqlite3
 import sys
+from pathlib import Path
 
 import pandas as pd
+from sqlalchemy import create_engine
 
-# --- 1. PATH HACK (Napojení na root projektu) ---
-current_dir = os.path.dirname(os.path.abspath(__file__))
-root_dir = os.path.dirname(current_dir)
-sys.path.append(root_dir)
+# --- 1. UKOTVENÍ PROSTORU (Pathlib) ---
+current_dir = Path(__file__).resolve().parent
+root_dir = current_dir.parent
+sys.path.append(str(root_dir))
 
 try:
-    from src.config_loader import load_config
+    from src.settings import get_settings
 except ImportError:
-    print("❌ Chyba: Nenalezen config_loader.py.")
+    print("❌ Chyba: Nemohu najít src.settings. Spouštíš skript z kořenového adresáře?")
     sys.exit(1)
 
-# --- 2. CONFIG & DB PATH ---
-config = load_config()
-# Získání absolutní cesty k DB ze stringu 'sqlite:///real_estate.db'
-db_path_raw = config["database"]["connection_string"].replace("sqlite:///", "")
-db_path = os.path.join(root_dir, db_path_raw)
-
-if not os.path.exists(db_path):
-    print(f"❌ Databáze neexistuje na cestě: {db_path}")
-    print("Tip: Spusť nejprve 'main.py' v kořenu projektu.")
-    sys.exit(1)
+# --- 2. NAČTENÍ ENERGIE A SPOJENÍ S HMOTOU ---
+settings = get_settings()
+db_url = settings.database.connection_string
+engine = create_engine(db_url)
 
 # --- 3. SQL DOTAZ (Pouze AKTUÁLNÍ ceny) ---
-# Enterprise pravidlo: Nikdy nedělej analýzu nad duplicitními historickými daty,
-# pokud explicitně neděláš časovou řadu.
+# Pravidlo: Analýza pouze nad deduplikovanými daty v aktuálním čase.
 query = """
-SELECT 
-    e.sreality_id,
-    e.title, 
-    e.locality, 
-    p.price, 
+SELECT
+    e.source,
+    e.external_id,
+    e.title,
+    e.locality,
+    p.price,
     p.scraped_at
 FROM estates e
 JOIN prices p ON e.id = p.estate_id
 WHERE p.scraped_at = (
-    -- Subquery: Pro každý dům najdi datum nejnovější ceny
+    -- Subquery: Pro každý inzerát najdi otisk nejnovější ceny
     SELECT MAX(scraped_at) FROM prices WHERE estate_id = e.id
 )
 ORDER BY p.price DESC
@@ -47,35 +41,39 @@ LIMIT 20
 """
 
 # --- 4. NAČTENÍ DAT ---
-conn = sqlite3.connect(db_path)
+print("📡 Čerpám data z databáze...")
 try:
-    df = pd.read_sql(query, conn)
-finally:
-    conn.close()
+    with engine.connect() as conn:
+        df = pd.read_sql(query, conn)
+except Exception as e:
+    print(f"❌ Nelze se spojit s databází: {e}")
+    sys.exit(1)
 
-# --- 5. VÝSTUP ---
+# --- 5. TRANSFORMACE A VÝSTUP ---
 if df.empty:
     print("📭 Databáze je prázdná.")
-else:
-    pd.set_option("display.max_columns", None)
-    pd.set_option("display.width", 1000)
-    pd.set_option("display.max_colwidth", 40)  # Zkrátíme dlouhé názvy
+    sys.exit(0)
 
-    print("\n💎 TOP 20 NEJDRAŽŠÍCH DOMŮ (Aktuální nabídka)")
-    print("=" * 80)
+# Vektorové očištění časového razítka na čisté datum
+df["scraped_at"] = pd.to_datetime(df["scraped_at"]).dt.date
 
-    # Formátování ceny pro hezčí výpis (např. 15 000 000 místo 15000000)
-    print(
-        df.to_string(
-            formatters={
-                "price": "{:,.0f} Kč".format,
-                "scraped_at": lambda x: str(x)[:10],  # Jen datum bez hodin
-            }
-        )
+pd.set_option("display.max_columns", None)
+pd.set_option("display.width", 1000)
+pd.set_option("display.max_colwidth", 40)
+
+print("\n💎 TOP 20 NEJDRAŽŠÍCH NEMOVITOSTÍ (Aktuální nabídka)")
+print("=" * 90)
+
+print(
+    df.to_string(
+        formatters={
+            "price": "{:,.0f} Kč".format,
+        }
     )
+)
 
-    print("\n📊 STATISTIKA CEN (V milionech Kč)")
-    print("-" * 30)
-    # Zobrazíme statistiku v milionech, je to čitelnější
-    stats = (df["price"] / 1_000_000).describe()
-    print(stats.apply(lambda x: f"{x:,.2f} mil."))
+print("\n📊 STATISTIKA CEN TOP 20 (V milionech Kč)")
+print("-" * 40)
+# Agregace a vizualizace hmoty
+stats = (df["price"] / 1_000_000).describe()
+print(stats.apply(lambda x: f"{x:,.2f} mil."))

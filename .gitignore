@@ -1,24 +1,27 @@
-# Python cache (zbytečný balast)
-__pycache__/
-*.py[cod]
-
-# Virtuální prostředí (NIKDY NEPOSÍLAT NA GITHUB!)
+# --- 1. LOKÁLNÍ EKOSYSTÉM (Virtuální prostředí a IDE) ---
 .venv/
 env/
 venv/
+.vscode/
 
-# Databáze (Lokální data na GitHub nepatří)
+# --- 2. PLEVEL A STÍNY (Python kompiláty a OS balast) ---
+__pycache__/
+*.py[cod]
+*$py.class
+.DS_Store
+Thumbs.db
+
+# --- 3. HMOTA (Lokální data a databáze) ---
+data/
 *.db
 *.sqlite3
 
-# Logy
+# --- 4. PAMĚŤ A ARTEFAKTY (Logy a výstupy z analýz) ---
 logs/
 *.log
+*.png
+*.pdf
 
-# Konfigurace (Pokud bys tam měl hesla, sem to patří)
-# config.json # Zatím necháme odkomentované, protože tam nemáš tajná hesla, jen nastavení.
-# Až budeš mít hesla k DB, dáš config.json sem.
-
-# OS files
-.DS_Store
-Thumbs.db
+# --- 5. TAJEMSTVÍ A KONFIGURACE (Ochrana citlivých energií) ---
+.env
+# config.json # Odkomentuj, jakmile systém napojíš na ostrou DB s heslem.
