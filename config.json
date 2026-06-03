@@ -1,6 +1,6 @@
 {
     "database": {
-        "connection_string": "sqlite:///real_estate.db"
+        "connection_string": "sqlite:///data/real_estate.db"
     },
     "sreality": {
         "base_url": "https://www.sreality.cz/api/v1/estates/search",

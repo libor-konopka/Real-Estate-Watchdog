@@ -1,7 +1,9 @@
+from __future__ import annotations
+
 from datetime import datetime
 from typing import List, Optional
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, UniqueConstraint
+from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 
@@ -29,9 +31,9 @@ class Estate(Base):
     title: Mapped[str] = mapped_column(String)
     locality: Mapped[str] = mapped_column(String)
 
-    # Volitelná data (Optional definuje nullable=True na úrovni Pythonu i DB)
-    description: Mapped[Optional[str]] = mapped_column(String)
-    url: Mapped[Optional[str]] = mapped_column(String)
+    # Volitelná data (Nyní s typem Text pro neomezený datový tok)
+    description: Mapped[Optional[str]] = mapped_column(Text)
+    url: Mapped[Optional[str]] = mapped_column(Text)
 
     # Velikosti
     area_match: Mapped[Optional[int]] = mapped_column(Integer)
@@ -45,13 +47,13 @@ class Estate(Base):
         DateTime(timezone=True), onupdate=func.now()
     )
 
-    # Kompozitní klíč (Zdroj + ID musí být unikátní)
+    # Kompozitní klíč
     __table_args__ = (
         UniqueConstraint("source", "external_id", name="_source_ext_id_uc"),
     )
 
-    # Relace
-    prices: Mapped[List["Price"]] = relationship(
+    # Relace (Čistý zápis bez uvozovek díky __future__)
+    prices: Mapped[List[Price]] = relationship(
         back_populates="estate", cascade="all, delete-orphan"
     )
 
@@ -74,8 +76,8 @@ class Price(Base):
         DateTime(timezone=True), server_default=func.now()
     )
 
-    # Relace zpět
-    estate: Mapped["Estate"] = relationship(back_populates="prices")
+    # Relace zpět (Čistý zápis bez uvozovek)
+    estate: Mapped[Estate] = relationship(back_populates="prices")
 
     def __repr__(self) -> str:
         return f"<Price(val={self.price}, date='{self.scraped_at}')>"
