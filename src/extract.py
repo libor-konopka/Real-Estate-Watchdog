@@ -165,3 +165,136 @@ class IdnesScraper(BaseScraper):
 
         logger.info(f"📦 IDNES: Staženo {len(results)} položek.")
         return results
+
+
+class BezrealitkyScraper(BaseScraper):
+    """
+    Extraktor dat pro Bezrealitky.
+    Komunikuje přes GraphQL API pomocí POST požadavků.
+    Stránkování probíhá přes limit a offset.
+    """
+
+    async def scrape(self, session: aiohttp.ClientSession) -> List[Dict[str, Any]]:
+        results = []
+        cfg = self.config.bezrealitky
+
+        logger.info("📡 BEZREALITKY: Startuji async stahování...")
+
+        limit = 15  # Pevně daná velikost okna dle API
+        for page in range(1, cfg.max_pages + 1):
+            offset = (page - 1) * limit
+
+            payload = {
+                "operationName": "AdvertList",
+                "variables": {
+                    "limit": limit,
+                    "offset": offset,
+                    "order": "TIMEORDER_DESC",
+                    "locale": "CS",
+                    "country": "ceska-republika",
+                    "currency": "CZK",
+                    "estateType": [cfg.estate_type.upper()],
+                    "offerType": [cfg.offer_type.upper()],
+                    "regionOsmIds": [cfg.region_id],
+                },
+                "query": """
+                query AdvertList($limit: Int, $offset: Int, $estateType: [EstateType], $offerType: [OfferType], $regionOsmIds: [ID], $locale: Locale!) {
+                  listAdverts(
+                    limit: $limit
+                    offset: $offset
+                    estateType: $estateType
+                    offerType: $offerType
+                    regionOsmIds: $regionOsmIds
+                  ) {
+                    list {
+                      id
+                      uri
+                      title
+                      price
+                      surface
+                      surfaceLand
+                      city(locale: $locale)
+                    }
+                  }
+                }
+                """,
+            }
+
+            try:
+                async with session.post(
+                    cfg.base_url, json=payload, headers=self.headers
+                ) as response:
+                    if response.status != 200:
+                        logger.error(
+                            f"❌ BEZREALITKY: Chyba {response.status} na straně {page}"
+                        )
+                        break
+
+                    data = await response.json()
+
+                    if "errors" in data:
+                        logger.error(f"❌ BEZREALITKY GraphQL Error: {data['errors']}")
+                        break
+
+                    list_adverts = data.get("data", {}).get("listAdverts", {})
+                    if not list_adverts:
+                        logger.info("✅ BEZREALITKY: Konec dat (struktura nenalezena).")
+                        break
+
+                    adverts = list_adverts.get("list", [])
+
+                    if not adverts:
+                        logger.info("✅ BEZREALITKY: Konec dat (žádné inzeráty).")
+                        break
+
+                    for ad in adverts:
+                        # 1. Ochrana před prázdnotou v titulku
+                        raw_title = ad.get("title")
+                        if not raw_title:
+                            raw_title = "Rodinný dům"
+
+                        # 2. Syntetický otisk pozemku: Vlisujeme ho do textu pro app.py
+                        raw_land = ad.get("surfaceLand")
+                        if raw_land:
+                            final_title = f"{raw_title} s pozemkem {raw_land} m²"
+                        else:
+                            final_title = raw_title
+
+                        # 3. Ochrana před null hodnotami u ceny
+                        raw_price = ad.get("price")
+                        final_price = str(raw_price) if raw_price is not None else "0"
+
+                        # 4. Ochrana před prostorovou prázdnotou (Pydantic min_length=2)
+                        raw_city = ad.get("city")
+                        final_city = (
+                            raw_city
+                            if raw_city and len(raw_city) >= 2
+                            else "Neznámá lokalita"
+                        )
+
+                        item = {
+                            "_source_label": "bezrealitky",
+                            "external_id": str(ad.get("id", "")),
+                            "title": final_title,
+                            "url": f"https://www.bezrealitky.cz/nemovitosti-byty-domy/{ad.get('uri', '')}",
+                            "price_raw": final_price,
+                            "locality": final_city,
+                        }
+                        results.append(item)
+
+                    # --- NOVÁ FYZIKA STRÁNKOVÁNÍ ---
+                    if len(adverts) < limit:
+                        logger.info(
+                            "✅ BEZREALITKY: Dosaženo konce (méně položek než limit)."
+                        )
+                        break
+                    # -------------------------------
+
+                    await asyncio.sleep(cfg.request_delay)
+
+            except Exception as e:
+                logger.error(f"❌ BEZREALITKY: Neočekávaná chyba: {e}")
+                break
+
+        logger.info(f"📦 BEZREALITKY: Staženo {len(results)} položek.")
+        return results

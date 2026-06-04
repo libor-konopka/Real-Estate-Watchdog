@@ -19,6 +19,14 @@
         "request_delay": 1.0,
         "default_locality": "Příbram (okres)"
     },
+    "bezrealitky": {
+        "base_url": "https://api.bezrealitky.cz/graphql/",
+        "region_id": "R441434",
+        "estate_type": "DUM",
+        "offer_type": "PRODEJ",
+        "max_pages": 10,
+        "request_delay": 1.0
+    },
     "logging": {
         "level": "INFO",
         "file": "logs/pipeline.log"

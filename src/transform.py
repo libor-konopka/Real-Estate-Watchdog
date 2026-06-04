@@ -58,6 +58,17 @@ class Transformer:
                     url = str(item.get("url", ""))
                     clean_price = Transformer._parse_price(item.get("price_raw", "0"))
 
+                elif source == "bezrealitky":
+                    raw_id = item.get("external_id")
+                    if not raw_id:
+                        continue
+
+                    external_id = str(raw_id)
+                    title = str(item.get("title", "Neznámý titulek"))
+                    locality = str(item.get("locality", "Neznámá lokalita"))
+                    url = str(item.get("url", ""))
+                    clean_price = Transformer._parse_price(item.get("price_raw", "0"))
+
                 else:
                     # Neznámý zdroj
                     continue

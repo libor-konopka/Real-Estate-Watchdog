@@ -10,7 +10,7 @@ from typing import Any, Dict, List
 
 import aiohttp
 
-from src.extract import IdnesScraper, SrealityScraper
+from src.extract import BezrealitkyScraper, IdnesScraper, SrealityScraper
 from src.load import Loader
 from src.logger import logger
 from src.settings import AppConfig
@@ -19,7 +19,11 @@ from src.transform import Transformer
 
 async def run_extraction(config: AppConfig) -> List[Dict[str, Any]]:
     """Spustí datové extraktory paralelně a sloučí jejich energetické toky."""
-    scrapers = [SrealityScraper(config), IdnesScraper(config)]
+    scrapers = [
+        SrealityScraper(config),
+        IdnesScraper(config),
+        BezrealitkyScraper(config),
+    ]
 
     # Sdílená TCP session pro minimalizaci síťové režie
     async with aiohttp.ClientSession() as session:

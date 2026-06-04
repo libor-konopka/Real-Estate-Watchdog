@@ -49,6 +49,29 @@ class IdnesSettings(BaseModel):
     )
 
 
+class BezrealitkySettings(BaseModel):
+    base_url: str = Field(
+        ..., description="Základní GraphQL API endpoint pro komunikaci s portálem"
+    )
+    region_id: str = Field(
+        ..., description="Prostorový otisk regionu: např. 'okres-pribram'"
+    )
+    estate_type: str = Field(
+        ..., description="Typ hledané hmoty: např. 'dum', 'byt', 'pozemek'"
+    )
+    offer_type: str = Field(
+        ..., description="Povaha transakce: např. 'prodej', 'pronajem'"
+    )
+    max_pages: int = Field(
+        default=20, description="Bezpečnostní membrána maximálního počtu stránek", ge=1
+    )
+    request_delay: float = Field(
+        default=1.0,
+        description="Pauza mezi iteracemi (zachování harmonie s cílovým serverem a prevence banu)",
+        ge=0.5,
+    )
+
+
 class LoggingSettings(BaseModel):
     level: str = Field(
         default="INFO", description="Úroveň logování (INFO, DEBUG, ERROR)"
@@ -64,6 +87,7 @@ class AppConfig(BaseModel):
     database: DatabaseSettings
     sreality: SrealitySettings
     idnes: IdnesSettings
+    bezrealitky: BezrealitkySettings
     logging: LoggingSettings
 
     @classmethod

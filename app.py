@@ -109,6 +109,14 @@ only_with_land = st.sidebar.checkbox(
     "Zobrazit pouze inzeráty s rozlohou pozemku", value=True
 )
 
+st.sidebar.subheader("👁️ Diagnostika toku")
+st.sidebar.write("Absolutní počty v DB:")
+st.sidebar.write(df_raw["source"].value_counts())
+
+st.sidebar.write("Z toho bez pozemku:")
+st.sidebar.write(df_raw[df_raw["land_m2"].isna()]["source"].value_counts())
+
+
 # --- 5. APLIKACE FILTRŮ ---
 mask = (df_raw["price"] >= price_range[0]) & (df_raw["price"] <= price_range[1])
 
@@ -125,34 +133,55 @@ df_filtered = df_raw[mask].copy()
 # --- 6. MANIFESTACE (Zobrazení výsledků) ---
 st.subheader(f"Nalezeno: {len(df_filtered)} inzerátů splňujících tvé vize")
 
-# Formátování tabulky pro čistší vzhled
+
+def format_thousands(val):
+    """Čistící funkce pro oddělení tisíců mezerou."""
+    if pd.isna(val):
+        return ""
+    return f"{int(val):_}".replace("_", " ")
+
+
 if not df_filtered.empty:
     # Seřazení od nejlepší ceny za m2
     df_display = df_filtered.sort_values("price_per_m2", ascending=True)
 
-    # Vybereme jen to důležité a přejmenujeme pro UI
+    # Výběr a přejmenování (odstranil jsem "Kč" z hlaviček, přesuneme je k číslům)
     df_display = df_display[
         ["title", "locality", "price", "land_m2", "price_per_m2", "url"]
     ]
     df_display.columns = [
         "Titulek",
         "Lokalita",
-        "Cena (Kč)",
-        "Pozemek (m²)",
+        "Cena",
+        "Pozemek",
         "Cena za m²",
         "Odkaz",
     ]
 
-    # Zobrazení pomocí Streamlit Dataframe (umožňuje řazení kliknutím)
+    # Aplikace vizuální masky přes Pandas Styler
+    styled_df = df_display.style.format(
+        {
+            "Cena": lambda x: (
+                f"{format_thousands(x)} Kč" if format_thousands(x) else ""
+            ),
+            "Pozemek": lambda x: (
+                f"{format_thousands(x)} m²" if format_thousands(x) else ""
+            ),
+            "Cena za m²": lambda x: (
+                f"{format_thousands(x)} Kč" if format_thousands(x) else ""
+            ),
+        }
+    )
+
+    # Zhmotnění v UI
     st.dataframe(
-        df_display,
+        styled_df,
         column_config={
-            "Cena (Kč)": st.column_config.NumberColumn(format="%d Kč"),
-            "Cena za m²": st.column_config.NumberColumn(format="%d Kč"),
+            # Ponecháme pouze konfiguraci pro interaktivní odkaz
             "Odkaz": st.column_config.LinkColumn("Otevřít inzerát"),
         },
         hide_index=True,
-        use_container_width=True,
+        width="stretch",  # Nahrazuje zastaralý use_container_width
     )
 else:
     st.info("Žádné inzeráty neodpovídají tvému nastavení. Zkus uvolnit filtry.")
