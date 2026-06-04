@@ -11,11 +11,11 @@
         "district_id": 58,
         "per_page": 60,
         "max_pages": 20,
-        "request_delay": 2
+        "request_delay": 1.0
     },
     "idnes": {
         "base_url": "https://reality.idnes.cz/s/prodej/domy/okres-pribram/",
-        "max_pages": 5,
+        "max_pages": 50,
         "request_delay": 1.0,
         "default_locality": "Příbram (okres)"
     },

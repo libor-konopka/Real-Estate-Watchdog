@@ -116,14 +116,28 @@ class IdnesScraper(BaseScraper):
                         price_tag = article.find("p", class_="c-products__price")
 
                         if link_tag and title_tag:
-                            # BeautifulSoup může vracet vícenásobné atributy
-                            # jako seznam (AttributeValueList).
-                            # Tato pojistka zaručuje, že vždy získáme čistý řetězec.
+                            # BeautifulSoup může vracet vícenásobné atributy...
                             raw_href = link_tag.get("href")
                             if isinstance(raw_href, list):
                                 href = str(raw_href[0])
                             else:
                                 href = str(raw_href or "")
+
+                            # --- EXTRAKCE PŘESNÉ LOKALITY ---
+                            locality_tag = article.find("p", class_="c-products__info")
+                            if not locality_tag:
+                                locality_tag = article.find(
+                                    "span", class_="c-products__title-info"
+                                )
+
+                            if locality_tag:
+                                # Získáme celý text (např. "Třebsko, okres Příbram")
+                                raw_text = locality_tag.get_text(strip=True)
+                                # Rozštěpíme text podle čárky a vezmeme pouze první část (index 0)
+                                # .strip() zajistí odstranění případné mezery před čárkou
+                                precise_locality = raw_text.split(",")[0].strip()
+                            else:
+                                precise_locality = default_loc
 
                             item = {
                                 "_source_label": "idnes",
@@ -135,7 +149,7 @@ class IdnesScraper(BaseScraper):
                                 "price_raw": price_tag.get_text(strip=True)
                                 if price_tag
                                 else "0",
-                                "locality": default_loc,
+                                "locality": precise_locality,
                             }
                             results.append(item)
 

@@ -37,10 +37,33 @@ def load_data() -> pd.DataFrame:
     with engine.connect() as conn:
         df = pd.read_sql(query, conn)
 
-    # Rychlá vektorová extrakce velikosti pozemku (z předchozích analýz)
+    # Rychlá vektorová extrakce velikosti pozemku
     clean_titles = df["title"].str.replace(r"[\xa0 \.]", "", regex=True)
-    df["land_m2"] = clean_titles.str.extract(r"(?i)pozemek(\d+)m")[0].astype(float)
+    df["land_m2"] = clean_titles.str.extract(r"(?i)pozem(?:ek|kem)(\d+)m")[0].astype(
+        float
+    )
     df["price_per_m2"] = df["price"] / df["land_m2"]
+
+    # --- VYLEPŠENÁ KŘÍŽOVÁ DEDUPLIKACE ---
+    # 1. Normalizace prostoru (odstranění rozdílů ve velikosti písmen a mezerách)
+    df["loc_norm"] = df["locality"].str.lower().str.strip()
+
+    # 2. Hierarchie pravdy: Sreality na první místo
+    df = df.sort_values(by="source", ascending=False)
+
+    # 3. Aplikace filtru přes tři pilíře: Cena + Pozemek + Lokalita
+    mask_has_land = df["land_m2"].notna()
+
+    df_with_land = df[mask_has_land].drop_duplicates(
+        subset=["price", "land_m2", "loc_norm"], keep="first"
+    )
+    df_without_land = df[~mask_has_land]
+
+    df = pd.concat([df_with_land, df_without_land], ignore_index=True)
+
+    # 4. Očista mezipaměti od pomocných výpočtů
+    df = df.drop(columns=["loc_norm"])
+    # --------------------------------------
 
     return df
 
